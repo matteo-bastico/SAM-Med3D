@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Tuple
 from .image_encoder3D import ImageEncoderViT3D
 from .mask_decoder3D import MaskDecoder3D
 from .prompt_encoder3D import PromptEncoder3D
-
+from .mask_decoder3D_mlp import MaskDecoder3DMLP
 
 class Sam3D(nn.Module):
     mask_threshold: float = 0.0
@@ -23,7 +23,7 @@ class Sam3D(nn.Module):
         self,
         image_encoder: ImageEncoderViT3D,
         prompt_encoder: PromptEncoder3D,
-        mask_decoder: MaskDecoder3D,
+        mask_decoder: [MaskDecoder3D, MaskDecoder3DMLP],
         pixel_mean: List[float] = [123.675],
         pixel_std: List[float] = [58.395],
     ) -> None:

@@ -18,19 +18,19 @@ import argparse
 from torch.cuda import amp
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
-from monai.losses import DiceCELoss
 from contextlib import nullcontext
 from utils.click_method import get_next_click3D_torch_2
 from utils.data_loader import Dataset_Union_ALL, Union_Dataloader
 from utils.data_paths import img_datas
-
+from utils.loss import MultipleLoss
+from torch.nn import BCEWithLogitsLoss, MSELoss
 
 # %% set up parser
 parser = argparse.ArgumentParser()
 parser.add_argument('--task_name', type=str, default='union_train')
 parser.add_argument('--click_type', type=str, default='random')
 parser.add_argument('--multi_click', action='store_true', default=False)
-parser.add_argument('--model_type', type=str, default='vit_b_ori')
+parser.add_argument('--model_type', type=str, default='vit_b_mlp')
 parser.add_argument('--checkpoint', type=str, default='ckpt/sam_med3d.pth')
 parser.add_argument('--device', type=str, default='cuda')
 parser.add_argument('--work_dir', type=str, default='work_dir')
@@ -70,6 +70,7 @@ def build_model(args):
     sam_model = sam_model_registry3D[args.model_type](checkpoint=None).to(device)
     if args.multi_gpu:
         sam_model = DDP(sam_model, device_ids=[args.rank], output_device=args.rank)
+    print(sam_model)
     return sam_model
 
 
@@ -105,11 +106,11 @@ class BaseTrainer:
         self.dataloaders = dataloaders
         self.args = args
         self.best_loss = np.inf
-        self.best_dice = 0.0
+        self.best_metric = 0.0
         self.step_best_loss = np.inf
-        self.step_best_dice = 0.0
+        self.step_best_metric = 0.0
         self.losses = []
-        self.dices = []
+        self.metrics = []
         self.ious = []
         self.set_loss_fn()
         self.set_optimizer()
@@ -122,7 +123,17 @@ class BaseTrainer:
         self.norm_transform = tio.ZNormalization(masking_method=lambda x: x > 0)
         
     def set_loss_fn(self):
-        self.seg_loss = DiceCELoss(sigmoid=True, squared_pred=True, reduction='mean')
+        self.loss_fn = MultipleLoss(
+            loss_fns=[
+                BCEWithLogitsLoss(),
+                MSELoss(),
+                MSELoss(),
+                BCEWithLogitsLoss(),
+                BCEWithLogitsLoss()
+            ],
+            reduction='weighted',
+            weights=[1, 1, 1, 1,1]
+        )
     
     def set_optimizer(self):
         if self.args.multi_gpu:
@@ -161,10 +172,26 @@ class BaseTrainer:
         
         if last_ckpt:
             if(self.args.allow_partial_weight):
+                # Remove wrongly shaped parameters
+                def filter_wrong_shape(state_dict, model):
+                    filtered_state_dict = {}
+                    for name, param in state_dict.items():
+                        if name in model.state_dict():
+                            if param.shape == model.state_dict()[name].shape:
+                                filtered_state_dict[name] = param
+                            else:
+                                print(
+                                    f"Ignoring parameter '{name}' due to wrong shape: {param.shape}. Expected shape: {model.state_dict()[name].shape}")
+                        else:
+                            print(f"Ignoring parameter '{name}' because it does not exist in the model.")
+                    return filtered_state_dict
+
                 if self.args.multi_gpu:
-                    self.model.module.load_state_dict(last_ckpt['model_state_dict'], strict=False)
+                    filtered_state_dict = filter_wrong_shape(last_ckpt['model_state_dict'], self.model.module)
+                    self.model.module.load_state_dict(filtered_state_dict, strict=False)
                 else:
-                    self.model.load_state_dict(last_ckpt['model_state_dict'], strict=False)
+                    filtered_state_dict = filter_wrong_shape(last_ckpt['model_state_dict'], self.model)
+                    self.model.load_state_dict(filtered_state_dict, strict=False)
             else:
                 if self.args.multi_gpu:
                     self.model.module.load_state_dict(last_ckpt['model_state_dict'])
@@ -177,9 +204,9 @@ class BaseTrainer:
                 self.optimizer.load_state_dict(last_ckpt['optimizer_state_dict'])
                 self.lr_scheduler.load_state_dict(last_ckpt['lr_scheduler_state_dict'])
                 self.losses = last_ckpt['losses']
-                self.dices = last_ckpt['dices']
+                self.metrics = last_ckpt['metrics']
                 self.best_loss = last_ckpt['best_loss']
-                self.best_dice = last_ckpt['best_dice']
+                self.best_metric = last_ckpt['best_metric']
             print(f"Loaded checkpoint from {ckp_path} (epoch {self.start_epoch})")
         else:
             self.start_epoch = 0
@@ -192,98 +219,54 @@ class BaseTrainer:
             "optimizer_state_dict": self.optimizer.state_dict(),
             "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
             "losses": self.losses,
-            "dices": self.dices,
+            "metrics": self.metrics,
             "best_loss": self.best_loss,
-            "best_dice": self.best_dice,
+            "best_metric": self.best_metric,
             "args": self.args,
             "used_datas": img_datas,
         }, join(MODEL_SAVE_PATH, f"sam_model_{describe}.pth"))
-    
-    def batch_forward(self, sam_model, image_embedding, gt3D, low_res_masks, points=None):
-        
+
+    def batch_forward(
+            self,
+            sam_model,
+            image_embedding,
+            mask3D,
+            gt,
+            points=None
+    ):
+        low_res_masks = F.interpolate(
+            mask3D.float(),
+            size=(args.img_size // 4, args.img_size // 4, args.img_size // 4),
+            mode="nearest"  # The mask should be binary
+        )
         sparse_embeddings, dense_embeddings = sam_model.prompt_encoder(
             points=points,
             boxes=None,
             masks=low_res_masks,
         )
-        low_res_masks, iou_predictions = sam_model.mask_decoder(
-            image_embeddings=image_embedding.to(device), # (B, 256, 64, 64)
-            image_pe=sam_model.prompt_encoder.get_dense_pe(), # (1, 256, 64, 64)
-            sparse_prompt_embeddings=sparse_embeddings, # (B, 2, 256)
+        predictions = sam_model.mask_decoder(
+            image_embeddings=image_embedding.to(device),  # (B, 256, 64, 64)
+            image_pe=sam_model.prompt_encoder.get_dense_pe(),  # (1, 256, 64, 64)
+            sparse_prompt_embeddings=sparse_embeddings, # (B, N_points, 256)
             dense_prompt_embeddings=dense_embeddings, # (B, 256, 64, 64)
-            multimask_output=False,
         )
-        prev_masks = F.interpolate(low_res_masks, size=gt3D.shape[-3:], mode='trilinear', align_corners=False)
-        return low_res_masks, prev_masks
+        # Compute loss
+        loss = self.loss_fn(predictions, [gt[:, i:i+1] for i in range(gt.size(1))])
 
-    def get_points(self, prev_masks, gt3D):
-        batch_points, batch_labels = click_methods[self.args.click_type](prev_masks, gt3D)
+        return predictions, loss
 
-        points_co = torch.cat(batch_points, dim=0).to(device)
-        points_la = torch.cat(batch_labels, dim=0).to(device)
-
-        self.click_points.append(points_co)
-        self.click_labels.append(points_la)
-
-        points_multi = torch.cat(self.click_points, dim=1).to(device)
-        labels_multi = torch.cat(self.click_labels, dim=1).to(device)
-
-        if self.args.multi_click:
-            points_input = points_multi
-            labels_input = labels_multi
-        else:
-            points_input = points_co
-            labels_input = points_la
-        return points_input, labels_input
-
-    def interaction(self, sam_model, image_embedding, gt3D, num_clicks):
-        return_loss = 0
-        prev_masks = torch.zeros_like(gt3D).to(gt3D.device)
-        # Reduce the resolution of the mask
-        low_res_masks = F.interpolate(prev_masks.float(), size=(args.img_size//4,args.img_size//4,args.img_size//4))
-        random_insert = np.random.randint(2, 9)
-        for num_click in range(num_clicks):
-            # Each iteration sample a new point to use as prompt
-            # if --multi_click the points are stacked and used together
-            # otherwise, it is a single point at each iteration
-            points_input, labels_input = self.get_points(prev_masks, gt3D)
-            # Like in SAM, there are two iterations in which no points are used (added),
-            # to encourage the model to benefit from the supplied mask.
-            # One is randomly sampled while the other is the last iteration
-            if num_click == random_insert or num_click == num_clicks - 1:
-                low_res_masks, prev_masks = self.batch_forward(sam_model, image_embedding, gt3D, low_res_masks, points=None)
-            else:
-                low_res_masks, prev_masks = self.batch_forward(sam_model, image_embedding, gt3D, low_res_masks, points=[points_input, labels_input])
-            loss = self.seg_loss(prev_masks, gt3D)
-            return_loss += loss
-        return prev_masks, return_loss
-    
-    def get_dice_score(self, prev_masks, gt3D):
-        def compute_dice(mask_pred, mask_gt):
-            mask_threshold = 0.5
-
-            mask_pred = (mask_pred > mask_threshold)
-            mask_gt = (mask_gt > 0)
-            
-            volume_sum = mask_gt.sum() + mask_pred.sum()
-            if volume_sum == 0:
-                return np.NaN
-            volume_intersect = (mask_gt & mask_pred).sum()
-            return 2*volume_intersect / volume_sum
-    
-        pred_masks = (prev_masks > 0.5)
-        true_masks = (gt3D > 0)
-        dice_list = []
-        for i in range(true_masks.shape[0]):
-            dice_list.append(compute_dice(pred_masks[i], true_masks[i]))
-        return (sum(dice_list)/len(dice_list)).item() 
-
+    def get_metrics(self, predictions, gt):
+        # TODO: here it is only metric for TASK 1: Classification. Complete this function for all the tasks
+        total_samples = len(predictions[0])
+        probabilities = torch.sigmoid(predictions[0])
+        binary_predictions = torch.round(probabilities)
+        correct_predictions = torch.sum(binary_predictions == gt[0])
+        accuracy = correct_predictions / total_samples
+        return accuracy
 
     def train_epoch(self, epoch, num_clicks):
         epoch_loss = 0
-        # TODO: Epoch IoU is not computed
-        epoch_iou = 0
-        epoch_dice = 0
+        epoch_metric = 0
         self.model.train()
         if self.args.multi_gpu:
             sam_model = self.model.module
@@ -298,8 +281,14 @@ class BaseTrainer:
 
         self.optimizer.zero_grad()
         step_loss = 0
+        step_metric = 0
+        # for step, (image3D, mask3D, gt) in enumerate(tbar):
         for step, (image3D, gt3D) in enumerate(tbar):
-
+            mask3D = gt3D
+            # For a sample GT is
+            # [CLS, Bone Marrow (BM DS), Focal (FL), Paramedullary (PM), Extramedullary (EM)]
+            gt = torch.tensor(
+                [[1., 3., 2., 0., 0.]], device=self.args.device).repeat(image3D.shape[0], 1)  # GT is (N, 5)
             my_context = self.model.no_sync if self.args.rank != -1 and (step + 1) % self.args.accumulation_steps != 0 else nullcontext
 
             with my_context():
@@ -308,7 +297,9 @@ class BaseTrainer:
                 image3D = image3D.unsqueeze(dim=1)
                 
                 image3D = image3D.to(device)
-                gt3D = gt3D.to(device).type(torch.long)
+                mask3D = mask3D.to(device).type(torch.long)
+                gt = gt.to(device).type(torch.float)
+
                 with amp.autocast():
                     image_embedding = sam_model.image_encoder(image3D)
 
@@ -317,12 +308,18 @@ class BaseTrainer:
                     # TODO: pred_list is not filled
                     pred_list = []
 
-                    prev_masks, loss = self.interaction(sam_model, image_embedding, gt3D, num_clicks=11)                
+                    predictions, loss = self.batch_forward(
+                        sam_model,
+                        image_embedding,
+                        mask3D,
+                        gt,
+                    )
 
+                metric = self.get_metrics(predictions, [gt[:, i:i+1] for i in range(gt.size(1))])
                 epoch_loss += loss.item()
-                epoch_dice += self.get_dice_score(prev_masks, gt3D)
-
+                epoch_metric += metric.item()
                 cur_loss = loss.item()
+                cur_metric = metric.item()
 
                 loss /= self.args.accumulation_steps
                 
@@ -334,30 +331,33 @@ class BaseTrainer:
                 self.optimizer.zero_grad()
 
                 step_loss += cur_loss  # Added this here otherwise the step_loss is not counting for the last cur_loss
+                step_metric += cur_metric
                 print_loss = step_loss / self.args.accumulation_steps
+                print_metrics = step_metric / self.args.accumulation_steps  # This metric considers all the batches accumulated
                 step_loss = 0
-                print_dice = self.get_dice_score(prev_masks, gt3D)  # This print_dice is just the last batch
+                step_metric = 0
             else:
                 step_loss += cur_loss
+                step_metric += cur_metric
 
             if not self.args.multi_gpu or (self.args.multi_gpu and self.args.rank == 0):
                 if (step + 1) % self.args.accumulation_steps == 0 and step != 0:
-                    print(f'Epoch: {epoch}, Step: {step}, Loss: {print_loss}, Dice: {print_dice}')
-                    if print_dice > self.step_best_dice:
-                        self.step_best_dice = print_dice
-                        if print_dice > 0.9:
+                    print(f'Epoch: {epoch}, Step: {step}, Loss: {print_loss}, Metrics: {print_metrics}')
+                    if print_metrics > self.step_best_metric:
+                        self.step_best_metric = print_metrics
+                        if print_metrics > 0.9:
                             self.save_checkpoint(
                                 epoch,
                                 sam_model.state_dict(),
-                                describe=f'{epoch}_step_dice:{print_dice}_best'
+                                describe=f'{epoch}_step_metric:{print_metrics}_best'
                             )
                     if print_loss < self.step_best_loss:
                         self.step_best_loss = print_loss
             
         epoch_loss /= step + 1
-        epoch_dice /= step + 1
+        epoch_metric /= step + 1
 
-        return epoch_loss, epoch_iou, epoch_dice, pred_list
+        return epoch_loss, epoch_metric, pred_list
 
     def eval_epoch(self, epoch, num_clicks):
         return 0
@@ -370,7 +370,6 @@ class BaseTrainer:
         plt.savefig(join(MODEL_SAVE_PATH, f'{save_name}.png'))
         plt.close()
 
-
     def train(self):
         self.scaler = amp.GradScaler()
         for epoch in range(self.start_epoch, self.args.num_epochs):
@@ -380,7 +379,7 @@ class BaseTrainer:
                 dist.barrier()
                 self.dataloaders.sampler.set_epoch(epoch)
             num_clicks = np.random.randint(1, 21)
-            epoch_loss, epoch_iou, epoch_dice, pred_list = self.train_epoch(epoch, num_clicks)
+            epoch_loss, epoch_metric, pred_list = self.train_epoch(epoch, num_clicks)
 
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
@@ -389,10 +388,10 @@ class BaseTrainer:
         
             if not self.args.multi_gpu or (self.args.multi_gpu and self.args.rank == 0):
                 self.losses.append(epoch_loss)
-                self.dices.append(epoch_dice)
+                self.metrics.append(epoch_metric)
                 print(f'EPOCH: {epoch}, Loss: {epoch_loss}')
-                print(f'EPOCH: {epoch}, Dice: {epoch_dice}')
-                logger.info(f'Epoch\t {epoch}\t : loss: {epoch_loss}, dice: {epoch_dice}')
+                print(f'EPOCH: {epoch}, Metric: {epoch_metric}')
+                logger.info(f'Epoch\t {epoch}\t : loss: {epoch_loss}, metric: {epoch_metric}')
 
                 if self.args.multi_gpu:
                     state_dict = self.model.module.state_dict()
@@ -415,22 +414,22 @@ class BaseTrainer:
                         describe='loss_best'
                     )
                 
-                # save train dice best checkpoint
-                if epoch_dice > self.best_dice: 
-                    self.best_dice = epoch_dice
+                # save train metric best checkpoint
+                if epoch_metric > self.best_metric:
+                    self.best_metric = epoch_metric
                     self.save_checkpoint(
                         epoch,
                         state_dict,
-                        describe='dice_best'
+                        describe='metric_best'
                     )
 
-                self.plot_result(self.losses, 'Dice + Cross Entropy Loss', 'Loss')
-                self.plot_result(self.dices, 'Dice', 'Dice')
+                self.plot_result(self.losses, 'Weighted sum of losses', 'Losses')
+                self.plot_result(self.metrics, 'Metric', 'Metric')
         logger.info('=====================================================================')
         logger.info(f'Best loss: {self.best_loss}')
-        logger.info(f'Best dice: {self.best_dice}')
+        logger.info(f'Best metric: {self.best_metric}')
         logger.info(f'Total loss: {self.losses}')
-        logger.info(f'Total dice: {self.dices}')
+        logger.info(f'Total metric: {self.metrics}')
         logger.info('=====================================================================')
         logger.info(f'args : {self.args}')
         logger.info(f'Used datasets : {img_datas}')
