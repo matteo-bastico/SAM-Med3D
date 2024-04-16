@@ -1,3 +1,4 @@
+"""
 img_datas = [
 'sam3d_train/medical_data_all/COVID_lesion/COVID1920_ct',
 'sam3d_train/medical_data_all/COVID_lesion/Chest_CT_Scans_with_COVID-19_ct',
@@ -374,6 +375,16 @@ img_datas = [
 'sam3d_train/medical_data_all/white_matter/iseg2019_mr_t2',
 'sam3d_train/medical_data_all/white_matter_hyperintensity/WMH_mr_flair',
 'sam3d_train/medical_data_all/white_matter_hyperintensity/WMH_mr_t1',
+]
+"""
+
+img_datas = [
+    'data/medical_preprocessed/bladder/CTORG_ct',
+    'data/medical_preprocessed/bone/CTORG_ct',
+    'data/medical_preprocessed/kidneys/CTORG_ct',
+    'data/medical_preprocessed/liver/CTORG_ct',
+    'data/medical_preprocessed/lungs/CTORG_ct',
+    'data/medical_preprocessed/brain/CTORG_ct'
 ]
 
 all_classes = [

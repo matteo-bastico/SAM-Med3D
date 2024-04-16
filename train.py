@@ -291,7 +291,7 @@ class BaseTrainer:
 
         self.optimizer.zero_grad()
         step_loss = 0
-        for step, (image3D, gt3D) in enumerate(tbar):
+        for step, (image3D, gt3D, mask3D) in enumerate(tbar):
 
             my_context = self.model.no_sync if self.args.rank != -1 and step % self.args.accumulation_steps != 0 else nullcontext
 
@@ -445,7 +445,8 @@ def device_config(args):
             if args.device == 'mps':
                 args.device = torch.device('mps')
             else:
-                args.device = torch.device(f"cuda:{args.gpu_ids[0]}")
+                if args.device == 'cuda':
+                    args.device = torch.device(f"cuda:{args.gpu_ids[0]}")
         else:
             args.nodes = 1
             args.ngpus_per_node = len(args.gpu_ids)

@@ -12,6 +12,7 @@ import os
 import json
 import shutil
 import nibabel as nib
+import numpy as np
 from tqdm import tqdm
 import torchio as tio
 
@@ -50,12 +51,13 @@ def resample_nii(input_path: str, output_path: str, target_spacing: tuple = (1.5
     
     save_image.save(output_path)
 
-dataset_root = "./data"
+dataset_root = "../data"
 dataset_list = [
-    'AMOS_val',
+    # 'AMOS_val',
+    'sub_CTORG_ct'
 ]
 
-target_dir = "./data/medical_preprocessed"
+target_dir = "../data/medical_preprocessed"
 
 
 for dataset in dataset_list:
@@ -87,11 +89,12 @@ for dataset in dataset_list:
 
             target_img_path = osp.join(target_img_dir, osp.basename(img).replace("_0000.nii.gz", ".nii.gz"))
             target_gt_path = osp.join(target_gt_dir, osp.basename(gt).replace("_0000.nii.gz", ".nii.gz"))
-
             gt_img = nib.load(gt)    
             spacing = tuple(gt_img.header['pixdim'][1:4])
             spacing_voxel = spacing[0] * spacing[1] * spacing[2]
             gt_arr = gt_img.get_fdata()
+            # Here we round to int because it gives some problem with some datasets
+            gt_arr = np.around(gt_arr)
             gt_arr[gt_arr != idx] = 0
             gt_arr[gt_arr != 0] = 1
             volume = gt_arr.sum()*spacing_voxel
