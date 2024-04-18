@@ -1,5 +1,6 @@
 .idea/*
 data/*
+wandb/*
 ckpt/*
 results/*
 work_dir/*

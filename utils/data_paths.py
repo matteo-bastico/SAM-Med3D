@@ -379,6 +379,11 @@ img_datas = [
 """
 
 img_datas = [
+    'data/medical_preprocessed/healthy/TCIA_ct',
+    'data/medical_preprocessed/mm/Bologna_ct'
+]
+
+img_datas_sam3D = [
     'data/medical_preprocessed/bladder/CTORG_ct',
     'data/medical_preprocessed/bone/CTORG_ct',
     'data/medical_preprocessed/kidneys/CTORG_ct',
