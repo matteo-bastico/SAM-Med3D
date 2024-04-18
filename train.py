@@ -27,6 +27,11 @@ from utils.loss import MultipleLoss
 from torch.nn import BCEWithLogitsLoss, MSELoss
 from sklearn.metrics import roc_auc_score
 
+try:
+    import idr_torch
+except ImportError:
+    pass
+
 # %% set up parser
 parser = argparse.ArgumentParser()
 parser.add_argument('--task_name', type=str, default='union_train')
@@ -648,6 +653,9 @@ class BaseTrainer:
             num_clicks = np.random.randint(1, 21)
             epoch_loss, single_losses, epoch_metrics = self.train_epoch(epoch, num_clicks)
 
+            # If "Detected call of `lr_scheduler.step()` before `optimizer.step()`.
+            # See https://discuss.pytorch.org/t/userwarning-detected-call-of-lr-scheduler-step-before-optimizer-step/164814/5
+            # and https://discuss.pytorch.org/t/optimizer-step-before-lr-scheduler-step-error-using-gradscaler/92930
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
             if self.args.multi_gpu:
@@ -797,11 +805,14 @@ def main():
     mp.set_sharing_strategy('file_system')
     device_config(args)
     if args.multi_gpu:
+        main_worker(idr_torch.rank, args)
+        """
         mp.spawn(
             main_worker,
             nprocs=args.world_size,
             args=(args, )
         )
+        """
     else:
         random.seed(2023)
         np.random.seed(2023)
@@ -856,7 +867,7 @@ def setup(rank, world_size):
     # initialize the process group
     dist.init_process_group(
         backend='nccl',
-        init_method=f'tcp://127.0.0.1:{args.port}',
+        # init_method=f'tcp://127.0.0.1:{args.port}',
         world_size=world_size,
         rank=rank
     )

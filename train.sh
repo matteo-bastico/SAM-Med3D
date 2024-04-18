@@ -1,9 +1,12 @@
 python train.py \
-  --device=cpu \
+  --device=cuda \
+  --multi_gpu \
   --checkpoint=ckpt/sam_med3d_turbo.pth \
-  --batch_size=1 \
+  --batch_size=2 \
   --num_epochs=2 \
   --allow_partial_weight \
-  --accumulation_steps=4 \
+  --accumulation_steps=1 \
   --num_workers=8 \
-  --freeze_encoder
+  --freeze_encoder \
+  --wandb_mode='offline' \
+  --port=23456
