@@ -64,6 +64,7 @@ parser.add_argument('--loss_weights', type=float, nargs='+', default=[1, 1, 1, 1
 parser.add_argument('--log_all', action='store_true', default=False)
 parser.add_argument('--entity', type=str, default='phd-matteo')
 parser.add_argument('--project', type=str, default='DIMA-MM')
+parser.add_argument('--wandb_mode', type=str, default='online')
 
 args = parser.parse_args()
 
@@ -809,6 +810,7 @@ def main():
         run = wandb.init(
             entity=args.entity,
             project=args.project,
+            mode=args.wandb_mode,
             config=args
         )
         # Load datasets
@@ -865,6 +867,7 @@ def setup_run(args):
         run = wandb.init(
             entity=args.entity,
             project=args.project,
+            mode=args.wandb_mode,
             group="DDP",
             config=args
         )
@@ -873,6 +876,7 @@ def setup_run(args):
             run = wandb.init(
                 entity=args.entity,
                 project=args.project,
+                mode=args.wandb_mode,
                 config=args
             )
         else:

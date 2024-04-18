@@ -1,6 +1,9 @@
 .idea/*
 data/*
 wandb/*
+jean_error/*
+jean_output/*
+jean.sh
 ckpt/*
 results/*
 work_dir/*
