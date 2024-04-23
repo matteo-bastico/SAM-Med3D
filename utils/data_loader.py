@@ -49,9 +49,11 @@ class Dataset_Union_ALL(Dataset):
         return len(self.mask_paths)
 
     def __getitem__(self, index):
-        sitk_image = sitk.ReadImage(self.image_paths[index])
-        sitk_mask = sitk.ReadImage(self.mask_paths[index])
-        annotations = self.annotations.loc[[self.image_paths[index]]]
+        annotations = self.annotations.iloc[index]
+        path_index = self.image_paths.index(annotations.name)
+        sitk_image = sitk.ReadImage(self.image_paths[path_index])
+        sitk_mask = sitk.ReadImage(self.mask_paths[path_index])
+        # annotations = self.annotations.loc[[self.image_paths[index]]]
         # Retrive class from path
         for item in self.classes:
             if item in self.image_paths[index]:
