@@ -13,6 +13,7 @@ import json
 import shutil
 import nibabel as nib
 import numpy as np
+import torch
 from tqdm import tqdm
 import torchio as tio
 
@@ -48,13 +49,13 @@ def resample_nii(input_path: str, output_path: str, target_spacing: tuple = (1.5
         save_image = cropper_or_padder(save_image)
     else:
         save_image = resampled_subject.img
-    
+
     save_image.save(output_path)
 
 dataset_root = "../data"
 dataset_list = [
     # 'AMOS_val',
-    'Bologna_ct',
+    # 'Bologna_ct',
     'TCIA_ct'
 ]
 
@@ -97,7 +98,7 @@ for dataset in dataset_list:
                 if img.endswith('.nii'):
                     resample_img = osp.join(resample_dir, osp.basename(img + '.gz'))
                 else:
-                    resample_img = osp.join(resample_dir, img)
+                    resample_img = osp.join(resample_dir, osp.basename(img))
 
                 if(not osp.exists(resample_img)):
                     resample_nii(img, resample_img)
