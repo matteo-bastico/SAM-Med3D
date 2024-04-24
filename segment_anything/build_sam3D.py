@@ -54,6 +54,19 @@ def build_sam3D_vit_b_ori(checkpoint=None):
 
 def build_sam3D_vit_b_mlp(checkpoint=None):
     return _build_sam3D_mlp(
+        image_size=(256, 128, 512),
+        encoder_embed_dim=768,
+        encoder_depth=12,
+        encoder_num_heads=12,
+        encoder_global_attn_indexes=[2, 5, 8, 11],
+        checkpoint=checkpoint,
+        num_outputs=5,
+        output_dims=[1, 1, 1, 1, 1]
+    )
+
+def build_sam3D_vit_b_mlp_ori(checkpoint=None):
+    return _build_sam3D_mlp(
+        image_size=(128, 128, 128),
         encoder_embed_dim=768,
         encoder_depth=12,
         encoder_num_heads=12,
@@ -71,6 +84,7 @@ sam_model_registry3D = {
     "vit_b": build_sam3D_vit_b,
     "vit_b_ori": build_sam3D_vit_b_ori,
     "vit_b_mlp": build_sam3D_vit_b_mlp,
+    "vit_b_mlp_ori": build_sam3D_vit_b_mlp_ori,
 }
 
 
@@ -174,6 +188,7 @@ def _build_sam3D_ori(
 
 
 def _build_sam3D_mlp(
+    image_size,
     encoder_embed_dim,
     encoder_depth,
     encoder_num_heads,
@@ -183,7 +198,6 @@ def _build_sam3D_mlp(
     checkpoint=None
 ):
     prompt_embed_dim = 384
-    image_size = (256, 128, 512)
     vit_patch_size = 16
     image_embedding_size = (image_size[0] // vit_patch_size, image_size[1] // vit_patch_size, image_size[2] // vit_patch_size)
     sam = Sam3D(
