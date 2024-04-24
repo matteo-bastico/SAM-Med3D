@@ -23,7 +23,7 @@ from contextlib import nullcontext
 from utils.click_method import get_next_click3D_torch_2
 from utils.data_loader import Dataset_Union_ALL, Union_Dataloader
 from utils.data_paths import img_datas
-from utils.loss import MultipleLoss
+from utils.loss import MultipleLoss, FLWithLogitsLoss
 from torch.nn import BCEWithLogitsLoss, MSELoss
 from sklearn.metrics import roc_auc_score
 
@@ -55,7 +55,7 @@ parser.add_argument('--lr_scheduler', type=str, default='multisteplr')
 parser.add_argument('--step_size', type=list, default=[120, 180])
 parser.add_argument('--gamma', type=float, default=0.1)
 parser.add_argument('--num_epochs', type=int, default=200)
-parser.add_argument('--img_size', type=int, nargs='+', default=128)
+parser.add_argument('--img_size', type=int, nargs='+', default=[128])
 parser.add_argument('--batch_size', type=int, default=12)
 parser.add_argument('--accumulation_steps', type=int, default=20)
 parser.add_argument('--lr', type=float, default=8e-4)
@@ -236,19 +236,19 @@ class BaseTrainer:
         binary_predictions = torch.round(probabilities)
         true_positives = torch.sum(binary_predictions * target)
         predicted_positives = torch.sum(binary_predictions)
-        return (true_positives / (predicted_positives + 1e-10)).item()
+        return (true_positives / (predicted_positives + 1e-7)).item()
 
     def get_recall(self, input, target):
         probabilities = torch.sigmoid(input)
         binary_predictions = torch.round(probabilities)
         true_positives = torch.sum(binary_predictions * target)
         actual_positives = torch.sum(target)
-        return (true_positives / (actual_positives + 1e-10)).item()
+        return (true_positives / (actual_positives + 1e-7)).item()
 
     def get_f1(self, input, target):
         prec = self.get_precision(input, target)
         rec = self.get_recall(input, target)
-        return 2 * ((prec * rec) / (prec + rec + 1e-10))
+        return 2 * ((prec * rec) / (prec + rec + 1e-7))
 
     def get_roc_auc(self, input, target):
         target_np = target.cpu().detach().numpy()
@@ -268,8 +268,8 @@ class BaseTrainer:
                 BCEWithLogitsLoss(),
                 MSELoss(),
                 MSELoss(),
-                BCEWithLogitsLoss(),
-                BCEWithLogitsLoss()
+                FLWithLogitsLoss(),
+                FLWithLogitsLoss()
             ],
             reduction='none',
         )
@@ -646,7 +646,7 @@ class BaseTrainer:
         if not self.args.multi_gpu or (self.args.multi_gpu and self.args.rank == 0):
             self.run.watch(self.model)
 
-        self.scaler = amp.GradScaler()
+        self.scaler = amp.GradScaler(enabled=self.args.device != 'cpu')
         for epoch in range(self.start_epoch, self.args.num_epochs):
             print(f'Epoch: {epoch}/{self.args.num_epochs - 1}')
 
