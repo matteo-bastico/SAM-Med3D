@@ -143,8 +143,8 @@ def get_dataloaders(args):
         paths=img_datas,
         transform=tio.Compose([
             tio.ToCanonical(),
-            tio.CropOrPad(target_shape=(args.img_size[0],args.img_size[1],args.img_size[2])),  # crop always in the center for val
-        ]),
+            tio.CropOrPad(mask_name='mask', target_shape=(args.img_size[0],args.img_size[1],args.img_size[2])),
+        ]),  # or maybe crop always in the center for val
         threshold=0,
         mode="validation",
         data_type="Val",
@@ -479,7 +479,7 @@ class BaseTrainer:
                 
                 self.scaler.scale(loss).backward()    
 
-            if (step + 1) % self.args.accumulation_steps == 0 and step != 0:
+            if ((step + 1) % self.args.accumulation_steps == 0 and step != 0) or (step + 1) == len(tbar):
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 self.optimizer.zero_grad()
@@ -524,7 +524,7 @@ class BaseTrainer:
                     step_metrics = sum_metrics_dicts(step_metrics, cur_metrics)
 
             if not self.args.multi_gpu or (self.args.multi_gpu and self.args.rank == 0):
-                if (step + 1) % self.args.accumulation_steps == 0 and step != 0:
+                if ((step + 1) % self.args.accumulation_steps == 0 and step != 0) or (step + 1) == len(tbar):
                     print(f'Epoch: {epoch}, Step: {step}, Loss: {print_loss}, Metrics: {print_metrics}')
 
                     for task, metrics in print_metrics.items():
