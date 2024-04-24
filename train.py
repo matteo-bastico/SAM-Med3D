@@ -494,9 +494,11 @@ class BaseTrainer:
                 print_loss = step_loss / self.args.accumulation_steps
                 print_losses = torch.tensor(step_losses).detach().cpu().numpy()
                 print_losses = np.mean(print_losses, axis=0)
-
                 # This metric considers all the batches accumulated
-                print_metrics = divide_metrics(step_metrics, self.args.accumulation_steps)
+                if (step + 1) == len(tbar):
+                    print_metrics = divide_metrics(step_metrics, len(tbar) % self.args.accumulation_steps)
+                else:
+                    print_metrics = divide_metrics(step_metrics, self.args.accumulation_steps)
                 step_loss = 0
                 step_losses = []
                 step_metrics = None
@@ -555,7 +557,7 @@ class BaseTrainer:
         with torch.no_grad():
             epoch_loss = 0
             epoch_losses = []
-            epoch_metrics = None
+
             self.model.eval()
             if self.args.multi_gpu:
                 sam_model = self.model.module
@@ -567,6 +569,9 @@ class BaseTrainer:
                 tbar = tqdm(self.dataloaders[1])
             else:
                 tbar = self.dataloaders[1]
+
+            all_predictions = []
+            all_gt = []
 
             for step, (image3D, mask3D, gt, path) in enumerate(tbar):
 
@@ -591,12 +596,8 @@ class BaseTrainer:
                     )
                     loss = sum([weight * loss for weight, loss in zip(self.loss_weights, losses)])
 
-                metrics = self.get_metrics(predictions, [gt[:, i:i + 1] for i in range(gt.size(1))])
-                cur_metrics = metrics
-                if epoch_metrics is None:
-                    epoch_metrics = cur_metrics
-                else:
-                    epoch_metrics = sum_metrics_dicts(epoch_metrics, cur_metrics)
+                all_predictions.append(predictions)
+                all_gt.append(gt)
 
                 epoch_loss += loss.item()
                 epoch_losses.append(losses)
@@ -605,8 +606,19 @@ class BaseTrainer:
             epoch_losses = torch.tensor(epoch_losses).detach().cpu().numpy()
             epoch_losses = np.mean(epoch_losses, axis=0)
 
-            epoch_metrics = divide_metrics(epoch_metrics, step + 1)
+            all_gt = torch.stack(all_gt).squeeze()
+            # Transpose the list of lists
+            transposed_lists = list(map(list, zip(*all_predictions)))
+            # List to hold stacked tensors
+            stacked_tensors = []
+            # Iterate over each transposed list of tensors
+            for tensor_list in transposed_lists:
+                # Stack tensors along a new dimension (default is dim=0)
+                stacked_tensor = torch.stack(tensor_list).squeeze(-1)
+                stacked_tensors.append(stacked_tensor)
+            all_predictions = stacked_tensors
 
+            epoch_metrics = self.get_metrics(all_predictions, [all_gt[:, i:i + 1] for i in range(all_gt.size(1))])
             return epoch_loss, epoch_losses, epoch_metrics
     
     def plot_result(self, plot_data, description, save_name):
