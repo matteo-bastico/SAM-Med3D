@@ -55,7 +55,7 @@ parser.add_argument('--lr_scheduler', type=str, default='multisteplr')
 parser.add_argument('--step_size', type=list, default=[120, 180])
 parser.add_argument('--gamma', type=float, default=0.1)
 parser.add_argument('--num_epochs', type=int, default=200)
-parser.add_argument('--img_size', type=int, default=128)
+parser.add_argument('--img_size', type=int, nargs='+', default=128)
 parser.add_argument('--batch_size', type=int, default=12)
 parser.add_argument('--accumulation_steps', type=int, default=20)
 parser.add_argument('--lr', type=float, default=8e-4)
@@ -72,6 +72,11 @@ parser.add_argument('--project', type=str, default='DIMA-MM')
 parser.add_argument('--wandb_mode', type=str, default='online')
 
 args = parser.parse_args()
+
+if len(args.img_size) == 1 or isinstance(args.img_size, int):
+    args.img_size = (args.img_size[0], args.img_size[0], args.img_size[0])
+elif len(args.img_size) != 3:
+    raise ValueError("img_size should be either a single value or a list of 3 values")
 
 device = args.device
 os.environ["CUDA_VISIBLE_DEVICES"] = ','.join([str(i) for i in args.gpu_ids])
@@ -126,25 +131,25 @@ def get_dataloaders(args):
         paths=img_datas,
         transform=tio.Compose([
             tio.ToCanonical(),
-            tio.CropOrPad(mask_name='mask', target_shape=(args.img_size,args.img_size,args.img_size)), # crop only object region
+            tio.CropOrPad(mask_name='mask', target_shape=(args.img_size[0],args.img_size[1],args.img_size[2])),  # crop only object region
             tio.RandomFlip(axes=(0, 1, 2)),
         ]),
-        threshold=1000,
-        ann_index=['ID', 'MDS'],
-        annotations=["BM DS", "FL", "PM", "EM"],
+        threshold=0,
+        ann_index=['MPC', 'MPC'],
+        annotations=["BM DS", "FL (sec Impetus)", "PM ", "EM "],
         classes=["healthy", "mm"],
     )
     val_dataset = Dataset_Union_ALL(
         paths=img_datas,
         transform=tio.Compose([
             tio.ToCanonical(),
-            tio.CropOrPad(mask_name='mask', target_shape=(args.img_size,args.img_size,args.img_size)), # crop only object region
+            tio.CropOrPad(target_shape=(args.img_size[0],args.img_size[1],args.img_size[2])),  # crop always in the center for val
         ]),
-        threshold=1000,
+        threshold=0,
         mode="validation",
         data_type="Val",
-        ann_index=['ID', 'ID'],
-        annotations=["BM DS", "FL", "PM", "EM"],
+        ann_index=['MPC', 'MPC'],
+        annotations=["BM DS", "FL (sec Impetus)", "PM ", "EM "],
         classes=["healthy", "mm"],
     )
 
@@ -371,7 +376,7 @@ class BaseTrainer:
     ):
         low_res_masks = F.interpolate(
             mask3D.float(),
-            size=(args.img_size // 4, args.img_size // 4, args.img_size // 4),
+            size=(args.img_size[0] // 4, args.img_size[1] // 4, args.img_size[2] // 4),
             mode="nearest"  # The mask should be binary
         )
         sparse_embeddings, dense_embeddings = sam_model.prompt_encoder(

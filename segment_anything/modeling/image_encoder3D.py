@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import Optional, Tuple, Type
+from typing import Optional, Tuple, Type, List
 
 
 class MLPBlock(nn.Module):
@@ -45,7 +45,7 @@ class LayerNorm3d(nn.Module):
 class ImageEncoderViT3D(nn.Module):
     def __init__(
         self,
-        img_size: int = 256,
+        img_size: [int | tuple] = 256,
         patch_size: int = 16,
         in_chans: int = 1,
         embed_dim: int = 768,
@@ -81,7 +81,10 @@ class ImageEncoderViT3D(nn.Module):
             global_attn_indexes (list): Indexes for blocks using global attention.
         """
         super().__init__()
-        self.img_size = img_size
+        if isinstance(img_size, int):
+            self.img_size = (img_size, img_size, img_size)
+        elif isinstance(img_size, (tuple, list)):
+            self.img_size = img_size
 
         self.patch_embed = PatchEmbed3D(
             kernel_size=(patch_size, patch_size, patch_size),
@@ -94,7 +97,8 @@ class ImageEncoderViT3D(nn.Module):
         if use_abs_pos:
             # Initialize absolute positional embedding with pretrain image size.
             self.pos_embed = nn.Parameter(
-                torch.zeros(1, img_size // patch_size, img_size // patch_size, img_size // patch_size, embed_dim)
+                torch.zeros(1, self.img_size[0] // patch_size,
+                            self.img_size[1] // patch_size, self.img_size[2] // patch_size, embed_dim)
             )
 
         self.blocks = nn.ModuleList()
@@ -109,7 +113,7 @@ class ImageEncoderViT3D(nn.Module):
                 use_rel_pos=use_rel_pos,
                 rel_pos_zero_init=rel_pos_zero_init,
                 window_size=window_size if i not in global_attn_indexes else 0,
-                input_size=(img_size // patch_size, img_size // patch_size, img_size // patch_size),
+                input_size=(self.img_size[0] // patch_size, self.img_size[1] // patch_size, self.img_size[2] // patch_size),
             )
             self.blocks.append(block)
 
@@ -396,11 +400,9 @@ def add_decomposed_rel_pos(
     rel_d = torch.einsum("bdhwc,dkc->bdhwk", r_q, Rd)
     rel_h = torch.einsum("bdhwc,hkc->bdhwk", r_q, Rh)
     rel_w = torch.einsum("bdhwc,wkc->bdhwk", r_q, Rw)
-    
 
-    
     attn = (
-        attn.view(B, q_d, q_h, q_w, k_d, k_h, k_w) + rel_d[:, :, :, :, None, None] + rel_h[:, :, :, None, :, None] + rel_w[:, :, :,None,None, :]
+        attn.view(B, q_d, q_h, q_w, k_d, k_h, k_w) + rel_d[:, :, :, :, :, None, None] + rel_h[:, :, :, :, None, :, None] + rel_w[:, :, :, :, None,None, :]
     ).view(B, q_d * q_h * q_w, k_d * k_h * k_w)
 
     return attn

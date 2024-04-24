@@ -46,7 +46,7 @@ class Dataset_Union_ALL(Dataset):
         self.get_all_meta_info = get_all_meta_info
     
     def __len__(self):
-        return len(self.mask_paths)
+        return len(self.annotations)
 
     def __getitem__(self, index):
         annotations = self.annotations.iloc[index]
@@ -56,7 +56,7 @@ class Dataset_Union_ALL(Dataset):
         # annotations = self.annotations.loc[[self.image_paths[index]]]
         # Retrive class from path
         for item in self.classes:
-            if item in self.image_paths[index]:
+            if item in self.image_paths[path_index]:
                 cls = self.classes.index(item)
                 break
         annotations = torch.cat([torch.tensor([cls]), torch.tensor(annotations.values.squeeze())])
@@ -106,7 +106,7 @@ class Dataset_Union_ALL(Dataset):
             return self.__getitem__(np.random.randint(self.__len__()))
         
         if self.mode == "train" and self.data_type == 'Tr':
-            return subject.image.data.clone().detach(), subject.mask.data.clone().detach(), annotations
+            return subject.image.data.clone().detach().float(), subject.mask.data.clone().detach().float(), annotations.float()
         elif self.get_all_meta_info:
             meta_info = {
                 "image_path": self.image_paths[index],
@@ -114,9 +114,9 @@ class Dataset_Union_ALL(Dataset):
                 "direction": sitk_mask.GetDirection(),
                 "spacing": sitk_mask.GetSpacing(),
             }
-            return subject.image.data.clone().detach(), subject.mask.data.clone().detach(), annotations, meta_info
+            return subject.image.data.clone().detach().float(), subject.mask.data.clone().detach().float(), annotations, meta_info
         else:
-            return subject.image.data.clone().detach(), subject.mask.data.clone().detach(), annotations, self.image_paths[index]
+            return subject.image.data.clone().detach().float(), subject.mask.data.clone().detach().float(), annotations, self.image_paths[index]
  
     def _set_file_paths(self, paths):
         self.image_paths = []
@@ -232,8 +232,10 @@ if __name__ == "__main__":
         data_type='Tr',
         transform=tio.Compose([
             tio.ToCanonical(),
-            tio.CropOrPad(mask_name='mask', target_shape=(128,128,128)),
-        ]), 
+            tio.CropOrPad(mask_name='mask', target_shape=(256, 128, 512)),
+        ]),
+        ann_index=['MPC', 'MPC'],
+        annotations=["BM DS", "FL (sec Impetus)", "PM ", "EM "],
         threshold=0,
         pcc=False
     )
