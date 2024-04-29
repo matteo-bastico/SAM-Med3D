@@ -34,7 +34,7 @@ except ImportError:
 
 # %% set up parser
 parser = argparse.ArgumentParser()
-parser.add_argument('--task_name', type=str, default='union_train')
+parser.add_argument('--task_name', type=str, default='multitask_freeze_e100_lr8e-4_linear_bs4_as8')
 parser.add_argument('--click_type', type=str, default='random')
 parser.add_argument('--multi_click', action='store_true', default=False)
 parser.add_argument('--model_type', type=str, default='vit_b_mlp')
@@ -52,7 +52,7 @@ parser.add_argument('--freeze_encoder', action='store_true', default=False)
 
 # lr_scheduler
 parser.add_argument('--lr_scheduler', type=str, default='multisteplr')
-parser.add_argument('--step_size', type=list, default=[120, 180])
+parser.add_argument('--step_size', type=int, nargs='+', default=[120, 180])
 parser.add_argument('--gamma', type=float, default=0.1)
 parser.add_argument('--num_epochs', type=int, default=200)
 parser.add_argument('--img_size', type=int, nargs='+', default=[128])
@@ -297,7 +297,7 @@ class BaseTrainer:
                                                                 self.args.step_size[0],
                                                                 self.args.gamma)
         elif self.args.lr_scheduler == 'coswarm':
-            self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer)
+            self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, T_0=self.args.step_size[0])
         else:
             self.lr_scheduler = torch.optim.lr_scheduler.LinearLR(self.optimizer, 0.1)
 
@@ -766,7 +766,7 @@ class BaseTrainer:
                     val_log_single_losses[f'val/Task {i}/loss'] = single_loss
 
                 self.run.log(
-                    {"train/epoch": epoch, "train/loss": epoch_loss} |
+                    {"train/epoch": epoch, "train/loss": epoch_loss, 'train/lr': self.lr_scheduler.get_last_lr()[-1]} |
                     flatten_metrics(epoch_metrics, prefix="train/", separator="/") |
                     log_single_losses |
                     {"val/epoch": epoch, "val/loss": val_epoch_loss} |

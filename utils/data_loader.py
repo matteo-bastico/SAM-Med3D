@@ -229,10 +229,10 @@ if __name__ == "__main__":
     test_dataset = Dataset_Union_ALL(
         paths=['../data/medical_preprocessed/healthy/TCIA_ct',
                '../data/medical_preprocessed/mm/Bologna_ct'],
-        data_type='Tr',
+        data_type='Val',
         transform=tio.Compose([
             tio.ToCanonical(),
-            tio.CropOrPad(mask_name='mask', target_shape=(256, 128, 512)),
+            tio.CropOrPad(target_shape=(256, 128, 512), mask_name="mask"),
         ]),
         ann_index=['MPC', 'MPC'],
         annotations=["BM DS", "FL (sec Impetus)", "PM ", "EM "],
@@ -246,7 +246,7 @@ if __name__ == "__main__":
         batch_size=4,
         shuffle=True
     )
-    for i,j,a in test_dataloader:
+    for i,j,a, _ in test_dataloader:
         print(a)
         # print(i.shape)
         # print(j.shape)

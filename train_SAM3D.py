@@ -27,7 +27,7 @@ from utils.data_paths import img_datas_sam3D as img_datas
 
 # %% set up parser
 parser = argparse.ArgumentParser()
-parser.add_argument('--task_name', type=str, default='union_train')
+parser.add_argument('--task_name', type=str, default='multitask_freeze_e100_lr8e-4_linear_bs4_as8')
 parser.add_argument('--click_type', type=str, default='random')
 parser.add_argument('--multi_click', action='store_true', default=False)
 parser.add_argument('--model_type', type=str, default='vit_b_ori')

@@ -1,12 +1,15 @@
 python train.py \
   --device=cuda \
-  --multi_gpu \
-  --checkpoint=ckpt/sam_med3d_turbo.pth \
-  --batch_size=2 \
-  --num_epochs=2 \
+  --checkpoint=ckpt/sam_vit_b_mlp.pth \
+  --batch_size=4 \
+  --num_epochs=100 \
   --allow_partial_weight \
-  --accumulation_steps=1 \
+  --accumulation_steps=8 \
   --num_workers=8 \
+  --wandb_mode='online' \
+  --img_size 256 128 512 \
   --freeze_encoder \
-  --wandb_mode='offline' \
-  --port=23456
+  --lr_scheduler='multisteplr' \
+  --step_size 20 60 \
+  --lr=8e-3 \
+  --task_name multitask_freeze_e100_lr8e-4_mstep2060_bs4_as8
